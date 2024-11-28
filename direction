@@ -1,0 +1,5 @@
+{
+    python3 -m venv NAME // создание виртуального окружения
+
+    sourse ./NAME/bin/activete // запуск
+}

@@ -2,15 +2,30 @@ import telebot
 from fpdf import FPDF
 import os
 from datetime import datetime
+from dotenv import dotenv_values
+import mimetypes
 
+
+config = dotenv_values(".env")
 # Токен бота
-TOKEN = "7422108576:AAGmYfNL9BKnLw_WHJ2CSQkU2y9kK9bT8N4"
-ADMIN_ID = 5999342037
+TOKEN = config.get("TOKEN")
+ADMIN_ID = config.get("ADMIN_ID")
 
 bot = telebot.TeleBot(TOKEN)
 
 # Временное хранилище данных
 user_data = {}
+
+def create_user_folder(base_path, user_id):
+    # Фойдаланувчи учун тўлиқ йўл яратиш
+    user_folder = os.path.join(base_path, str(user_id))
+    
+    # Агар папка мавжуд бўлмаса, яратиш
+    if not os.path.exists(user_folder):
+        os.makedirs(user_folder)
+    
+    return user_folder
+
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -31,6 +46,72 @@ def reset_data(message):
         bot.send_message(message.chat.id, "Все загруженные фотографии сброшены!")
     else:
         bot.send_message(message.chat.id, "У вас нет загруженных фотографий для сброса.")
+
+@bot.message_handler(content_types=['photo', 'document'])
+def handle_photo_or_file(message):
+    user_id = message.from_user.id
+
+    # Создаём структуру для хранения данных, если пользователя ещё нет
+    if user_id not in user_data:
+        user_data[user_id] = {'photos': {}, 'notified': False, 'album_id': None, 'index': 0}
+
+    # Проверяем, является ли сообщение частью альбома
+    album_id = message.media_group_id
+    if album_id:
+        # Если пришёл новый альбом, сбрасываем уведомление
+        if user_data[user_id]['album_id'] != album_id:
+            user_data[user_id]['album_id'] = album_id
+            user_data[user_id]['notified'] = False
+    else:
+        # Если альбом отсутствует, сбрасываем album_id
+        user_data[user_id]['album_id'] = None
+
+    # Обработка фото (content_type = 'photo')
+    if message.content_type == 'photo':
+        file_id = message.photo[-1].file_id
+    elif message.content_type == 'document':
+        # Обработка документа (content_type = 'document')
+        mime_type = message.document.mime_type
+        if mime_type not in ['image/jpeg', 'image/png']:
+            bot.reply_to(message, "Только файлы JPEG и PNG поддерживаются!")
+            return
+        file_id = message.document.file_id
+    else:
+        bot.reply_to(message, "Неподдерживаемый тип файла!")
+        return
+
+    # Получаем файл
+    file_info = bot.get_file(file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    # Создаём папку для пользователя, если её нет
+    user_folder = os.path.join("user_data", str(user_id))
+    if not os.path.exists(user_folder):
+        os.makedirs(user_folder)
+
+    # Увеличиваем индекс для сохранения порядка
+    user_data[user_id]['index'] += 1
+    photo_index = user_data[user_id]['index']
+
+    # Генерируем уникальное имя файла
+    file_extension = file_info.file_path.split('.')[-1]  # Получаем расширение файла
+    file_path = os.path.join(user_folder, f"photo_{photo_index}.{file_extension}")
+
+    # Сохраняем файл в папку пользователя
+    with open(file_path, 'wb') as new_file:
+        new_file.write(downloaded_file)
+
+    # Добавляем файл с учётом порядка
+    user_data[user_id]['photos'][photo_index] = file_path
+
+    # Уведомляем пользователя только если это первое фото в новом альбоме или отдельное фото
+    if not user_data[user_id]['notified']:
+        bot.reply_to(
+            message, 
+            "Ваши фото получены! Напишите /create, чтобы создать PDF файл."
+        )
+        user_data[user_id]['notified'] = True
+
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
@@ -56,14 +137,19 @@ def handle_photo(message):
     file_info = bot.get_file(photo_file_id)
     downloaded_file = bot.download_file(file_info.file_path)
 
+    # Создаём папку для пользователя, если её нет
+    user_folder = os.path.join("user_data", str(user_id))
+    if not os.path.exists(user_folder):
+        os.makedirs(user_folder)
+
     # Увеличиваем индекс для сохранения порядка
     user_data[user_id]['index'] += 1
     photo_index = user_data[user_id]['index']
 
     # Генерируем уникальное имя файла
-    file_path = f"temp_{user_id}_{photo_index}.jpg"
+    file_path = os.path.join(user_folder, f"photo_{photo_index}.jpg")
 
-    # Сохраняем файл
+    # Сохраняем файл в папку пользователя
     with open(file_path, 'wb') as new_file:
         new_file.write(downloaded_file)
 
@@ -99,21 +185,29 @@ def create_pdf(message):
         bot.send_message(message.chat.id, "Название файла не может быть пустым!")
         return
 
+    # Создаем папку для пользователя
+    user_folder = os.path.join("user_data", str(user_id))
+    if not os.path.exists(user_folder):
+        os.makedirs(user_folder)
+
+    # Копируем фотографии в папку пользователя
+    photo_paths = []
+    for i, photo_path in enumerate(sorted(user_data[user_id]['photos'].values())):
+        new_photo_path = os.path.join(user_folder, f"image_{i + 1}.jpg")
+        os.rename(photo_path, new_photo_path)  # Перемещаем файл
+        photo_paths.append(new_photo_path)
+
+    # Генерация PDF
     pdf = FPDF()
-
-    # Сортируем фотографии в порядке их индекса
-    photo_paths = [user_data[user_id]['photos'][i] for i in sorted(user_data[user_id]['photos'])]
-
     total_size = 0
+
     for photo_path in photo_paths:
         pdf.add_page()
         pdf.image(photo_path, x=10, y=10, w=190)  # Настраивай размеры, если нужно
-        
-        # Подсчитываем общий размер
         total_size += os.path.getsize(photo_path)
 
-    # Сохраняем PDF
-    pdf_path = f"{pdf_name}.pdf"
+    # Сохранение PDF
+    pdf_path = os.path.join(user_folder, f"{pdf_name}.pdf")
     pdf.output(pdf_path)
 
     # Проверяем размер PDF
@@ -139,12 +233,12 @@ def create_pdf(message):
                 caption=f"user: @{username}\nвремя: {current_time}"
             )
     
-    # Удаляем PDF и временные файлы
-    os.remove(pdf_path)
+    # Удаляем временные файлы и папку
     for photo_path in photo_paths:
         os.remove(photo_path)
-    del user_data[user_id]  # Очищаем данные пользователя
-
+    os.remove(pdf_path)
+    os.rmdir(user_folder)  # Удаляем папку пользователя
+    del user_data[user_id] 
 
 if __name__ == "__main__":
     print("Бот запущен...")

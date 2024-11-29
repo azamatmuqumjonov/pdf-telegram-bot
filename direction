@@ -3,3 +3,7 @@
 
     sourse ./NAME/bin/activete // запуск
 }
+
+{
+    pip install -r requirements.txt
+}

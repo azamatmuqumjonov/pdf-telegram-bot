@@ -2,8 +2,12 @@
     python3 -m venv NAME // создание виртуального окружения
 
     sourse ./NAME/bin/activete // запуск
+    
+    pip install -r requirements.txt // установка всех дополнений которые написаны в столбик в файле requirements.txt 
 }
 
 {
-    pip install -r requirements.txt
+    nohup COMAND FILE & // 
+
+    ps -ef | grep nohup просмотр nohup
 }

@@ -1,0 +1,13 @@
+{
+    python3 -m venv NAME // создание виртуального окружения
+
+    sourse ./NAME/bin/activete // запуск
+    
+    pip install -r requirements.txt // установка всех дополнений которые написаны в столбик в файле requirements.txt 
+}
+
+{
+    nohup COMAND FILE & // запуск в фоновом режиме
+
+    ps -ef | grep nohup // просмотр фоновых процессов
+}
